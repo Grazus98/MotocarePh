@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { 
   Settings, 
   Wrench, 
@@ -35,7 +35,7 @@ const App: React.FC = () => {
     maintenanceItems: INITIAL_MAINTENANCE_SCHEDULE,
     history: []
   });
-  const [dataLoading, setDataLoading] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const [odoInput, setOdoInput] = useState('0');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'assistant'>('dashboard');
@@ -51,46 +51,42 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Sync Data with Firestore
+  // Sync Data with Firestore (Real-time source of truth)
   useEffect(() => {
     if (!user) return;
 
-    setDataLoading(true);
     const userDocRef = doc(db, "users", user.uid);
 
-    // Initial fetch
-    getDoc(userDocRef).then((docSnap) => {
-      if (docSnap.exists()) {
-        const fetchedData = docSnap.data() as MotorbikeState;
-        setState(fetchedData);
-        setOdoInput(fetchedData.currentOdo.toString());
-      } else {
-        // Create initial doc for new user
-        setDoc(userDocRef, state);
-      }
-      setDataLoading(false);
-    });
-
-    // Real-time listener for multi-device sync
     const unsubscribe = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as MotorbikeState;
         setState(data);
-        // Only update input if it's currently focused or matches state? 
-        // For simplicity, we just keep input and state in sync here if not user-interacted
+        // Sync the input field with the saved odometer value
+        setOdoInput(data.currentOdo.toString());
+      } else {
+        // Create initial doc for new user if it doesn't exist
+        const initialState: MotorbikeState = {
+          modelName: "My Daily Ride",
+          currentOdo: 0,
+          maintenanceItems: INITIAL_MAINTENANCE_SCHEDULE,
+          history: []
+        };
+        setDoc(userDocRef, initialState);
       }
     });
 
     return () => unsubscribe();
   }, [user]);
 
-  // Push updates to Firestore
-  const saveStateToFirebase = async (newState: MotorbikeState) => {
+  const saveToFirebase = async (newState: MotorbikeState) => {
     if (!user) return;
+    setIsSyncing(true);
     try {
       await setDoc(doc(db, "users", user.uid), newState);
     } catch (err) {
       console.error("Firebase Sync Error:", err);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -98,8 +94,9 @@ const App: React.FC = () => {
     const newVal = parseInt(odoInput);
     if (!isNaN(newVal) && newVal >= state.currentOdo) {
       const newState = { ...state, currentOdo: newVal };
+      // Optimistic local update
       setState(newState);
-      await saveStateToFirebase(newState);
+      await saveToFirebase(newState);
     }
   };
 
@@ -133,8 +130,9 @@ const App: React.FC = () => {
       history: [newLog, ...state.history]
     };
 
+    // Optimistic local update
     setState(newState);
-    await saveStateToFirebase(newState);
+    await saveToFirebase(newState);
   };
 
   const handleLogout = () => signOut(auth);
@@ -183,12 +181,16 @@ const App: React.FC = () => {
         <div className="flex justify-between items-center mb-4">
           <div>
             <h1 className="text-2xl font-black bg-gradient-to-r from-indigo-500 to-sky-400 bg-clip-text text-transparent">MotoCare PH</h1>
-            <p className="text-xs text-slate-400 font-medium">Hello, <span className="text-indigo-400">{user.email?.split('@')[0]}</span></p>
+            <p className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
+              Hello, <span className="text-indigo-400">{user.email?.split('@')[0]}</span>
+              {isSyncing && <Loader2 className="w-3 h-3 text-indigo-500 animate-spin" />}
+            </p>
           </div>
           <div className="flex gap-2">
             <button 
               onClick={handleLogout}
               className="p-2 rounded-full bg-slate-900/50 hover:bg-red-500/10 text-slate-400 hover:text-red-400 transition-all border border-white/5"
+              title="Logout"
             >
               <LogOut className="w-5 h-5" />
             </button>
@@ -201,10 +203,7 @@ const App: React.FC = () => {
         <div className="glass-card p-4 rounded-xl border-indigo-500/30">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Current Odometer</span>
-            <div className="flex items-center gap-2">
-              {dataLoading && <Loader2 className="w-3 h-3 text-indigo-400 animate-spin" />}
-              <Gauge className="w-4 h-4 text-indigo-400" />
-            </div>
+            <Gauge className="w-4 h-4 text-indigo-400" />
           </div>
           <div className="flex gap-2">
             <input 
@@ -215,7 +214,8 @@ const App: React.FC = () => {
             />
             <button 
               onClick={updateOdo}
-              className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2 rounded-lg transition-all active:scale-95 whitespace-nowrap"
+              disabled={isSyncing}
+              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg transition-all active:scale-95 whitespace-nowrap"
             >
               Update
             </button>
@@ -282,7 +282,8 @@ const App: React.FC = () => {
                         <div className="mt-4 flex gap-2">
                           <button 
                             onClick={() => markServiceDone(item)}
-                            className="flex-1 bg-slate-900 hover:bg-indigo-600 hover:text-white transition-all py-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 border border-white/5"
+                            disabled={isSyncing}
+                            className="flex-1 bg-slate-900 hover:bg-indigo-600 hover:text-white transition-all py-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 border border-white/5 disabled:opacity-50"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             Mark Completed
