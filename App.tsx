@@ -434,7 +434,7 @@ const App: React.FC = () => {
 
       <footer className="w-full py-12 text-center mt-auto opacity-40">
         <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em]">
-          MotoCare Premium &copy; 2025
+          MotoCare PH &copy; 2025
         </p>
         <p className="text-[8px] font-bold text-slate-600 uppercase tracking-[0.2em] mt-1">
           Created by Grazus
