@@ -1,0 +1,7 @@
+{
+  "name": "MotoCare PH - Motorcycle Maintenance Tracker",
+  "description": "A smart motorcycle maintenance monitoring app that tracks odometer readings and reminds you of essential services like oil changes, CVT cleaning, and parts replacement based on official maintenance schedules.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
